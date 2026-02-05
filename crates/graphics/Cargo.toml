@@ -4,11 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+gpu-allocator = { version = "0.28.0",default-features = false,features = ["std","vulkan"] }
 ash = "0.38"
 ash-window = "0.13"
 raw-window-handle = "0.6"
-log = {workspace = true}
-simple_logger = {workspace = true}
+log = { workspace = true }
+simple_logger = { workspace = true }
 winit = "0.30"
 image = "0.25"
 slotmap = "1.1.1"
