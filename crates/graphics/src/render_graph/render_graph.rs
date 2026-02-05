@@ -83,9 +83,9 @@ pub mod test {
     pub fn test_basic() {
         let mut rendergraph = RenderGraph::new();
         let mut texture_container = texture_container::TextureContainer::new();
-        let present = texture_container.create_texture_view(CreateTextureView {});
-        let source = texture_container.create_texture_view(CreateTextureView {});
-        let intermid = texture_container.create_texture_view(CreateTextureView {});
+        let present = texture_container.create_texture_view_null();
+        let source = texture_container.create_texture_view_null();
+        let intermid = texture_container.create_texture_view_null();
 
         let present_op = Operation::Present(ResourceId::Texture(present));
         let draw_op =
@@ -105,10 +105,10 @@ pub mod test {
     pub fn test_parallel() {
         let mut rendergraph = RenderGraph::new();
         let mut texture_container = texture_container::TextureContainer::new();
-        let present = texture_container.create_texture_view(CreateTextureView {});
-        let source = texture_container.create_texture_view(CreateTextureView {});
-        let source_2_inter = texture_container.create_texture_view(CreateTextureView {});
-        let source_2 = texture_container.create_texture_view(CreateTextureView {});
+        let present = texture_container.create_texture_view_null();
+        let source = texture_container.create_texture_view_null();
+        let source_2_inter = texture_container.create_texture_view_null();
+        let source_2 = texture_container.create_texture_view_null();
         println!(
             "present:{:?} source:{:?} source_2_inter:{:?} source_2:{:?}",
             present, source, source_2_inter, source_2
