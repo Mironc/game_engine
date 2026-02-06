@@ -1,8 +1,8 @@
 use std::{collections::HashMap, error::Error};
 
 use ash::vk::{
-    self, DeviceMemory, Extent3D, Format, Image, ImageCreateFlags, ImageCreateInfo, ImageLayout,
-    ImageTiling, ImageType, ImageUsageFlags, ImageView, MemoryAllocateInfo, SampleCountFlags,
+    Extent3D, Format, Image, ImageCreateInfo, ImageLayout, ImageTiling, ImageType, ImageUsageFlags,
+    ImageView, SampleCountFlags,
 };
 use gpu_allocator::{
     MemoryLocation,
@@ -12,13 +12,14 @@ use slotmap::{SlotMap, new_key_type};
 
 use crate::device::DeviceContext;
 
+/// 
 pub struct TextureContainer {
     images: SlotMap<TextureId, Texture>,
     image_views: SlotMap<TextureViewId, ImageView>,
     image_view_to_image: HashMap<TextureViewId, TextureId>,
 }
 impl TextureContainer {
-    ///Creates new `TextureContainer`
+    /// Creates empty `TextureContainer`
     pub fn new() -> Self {
         Self {
             images: SlotMap::default(),
@@ -26,7 +27,10 @@ impl TextureContainer {
             image_view_to_image: HashMap::new(),
         }
     }
-    ///Creates `Texture` with given `CreateTexture` parameters
+    /// Creates `Texture` with given `CreateTexture`
+    /// 
+    /// # Errors
+    /// returns error if image creation or memory allocation fails 
     pub fn create_texture(
         &mut self,
         device: &DeviceContext,
@@ -75,31 +79,38 @@ impl TextureContainer {
         };
         Ok(self.images.insert(texture))
     }
-    ///Creates `TextureView` with given `CreateTexture` parameters
+    /// Creates `TextureView` with given `CreateTexture` 
     pub fn create_texture_view(&mut self, create: CreateTextureView) -> TextureViewId {
         self.image_views.insert(ImageView::null())
     }
-    ///!! FOR TESTING PURPOSES!!
+
+    /// **FOR TESTING PURPOSES**
     ///
-    /// Creates dummy `Texture`
+    /// Creates a dummy `Texture`
     #[cfg(test)]
     pub fn create_texture_null(&mut self) -> TextureId {
         self.images.insert(Texture::default())
     }
-    ///!! FOR TESTING PURPOSES !!
+    /// **FOR TESTING PURPOSES**
     ///
-    /// Creates dummy `TextureView`
+    /// Creates a dummy `TextureView`
     #[cfg(test)]
     pub fn create_texture_view_null(&mut self) -> TextureViewId {
         self.image_views.insert(ImageView::null())
     }
 }
 
-new_key_type! {pub struct TextureId;}
+new_key_type! {
+    /// Unique identifier to a `Texture` in a `TextureContainer`
+    pub struct TextureId;
+}
 
-new_key_type! {pub struct TextureViewId;}
+new_key_type! {
+    /// Unique identifier to a `TextureView` in a `TextureContainer`
+    pub struct TextureViewId;
+}
 
-///
+/// Texture
 #[derive(Debug, Default)]
 pub struct Texture {
     image: Image,
@@ -108,18 +119,19 @@ pub struct Texture {
     extent: Extent3D,
     format: Format,
 }
-///
+/// Configuration parameters for creating a `Texture`.
 #[derive(Debug, Clone, Default)]
 pub struct CreateTexture {
     extent: Extent3D,
     image_format: Format,
 }
 impl CreateTexture {
+    /// Creates new `CreateTexture` with default values
     pub fn new() -> Self {
         Self::default()
     }
 
-    ///Sets dimensions of the texture
+    /// Sets the dimensions of the texture
     pub fn dimensions(mut self, width: u32, height: u32, depth: u32) -> Self {
         self.extent = Extent3D {
             width,
@@ -129,13 +141,14 @@ impl CreateTexture {
         self
     }
 
-    ///Sets image format
+    /// Sets the image format
     pub fn image_format(mut self, image_format: Format) -> Self {
         self.image_format = image_format;
         self
     }
 }
-///TODO:Fill in
+//TODO:Fill in
+/// Configuration parameters for creating a `TextureView`.
 pub struct CreateTextureView {
     texture_id: TextureId,
 }
