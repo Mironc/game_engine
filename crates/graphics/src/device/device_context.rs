@@ -57,7 +57,7 @@ impl DeviceContext {
             device: device.clone(),
             physical_device: pdevice.handle(),
             debug_settings: AllocatorDebugSettings::default(),
-            buffer_device_address: true,
+            buffer_device_address: false,
             allocation_sizes: Default::default(),
         };
         let alloc = Mutex::new(Allocator::new(&alloc_createinfo)?);
