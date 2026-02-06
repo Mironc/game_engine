@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
 use ash::vk::{
-    AccessFlags, ClearColorValue, CommandBufferBeginInfo, DependencyFlags, Fence, ImageAspectFlags,
-    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, PipelineStageFlags,
+    AccessFlags, ClearColorValue, CommandBufferBeginInfo, DependencyFlags, Fence, Format,
+    ImageAspectFlags, ImageCopy, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
+    PipelineStageFlags,
 };
 use graphics::device::DeviceContext;
+use graphics::rendering::texture_container::{CreateTexture, TextureContainer, TextureId};
 use graphics::swapchain::SwapChain;
 use winit::event::WindowEvent;
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -18,6 +20,8 @@ pub struct App {
     swapchain: Option<SwapChain>,
     context: Option<Arc<GraphicsContext>>,
     device_context: Option<Arc<DeviceContext>>,
+    texture_container: Option<TextureContainer>,
+    texture_id: TextureId,
 }
 impl winit::application::ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
@@ -46,16 +50,21 @@ impl winit::application::ApplicationHandler for App {
 
         let swapchain = SwapChain::new(&shared_graphics_context, &shared_device_context, &window)
             .expect("couldn't create swapchain");
-
-        println!("STATE ADDR RESUMED: {:p}", self);
-        println!(
-            "QUEUE ADDR RESUMED: {:?}",
-            shared_device_context.render_queue().graphics_queue()
-        );
+        let mut texture_container = TextureContainer::new();
+        let texture_id = texture_container
+            .create_texture(
+                &shared_device_context,
+                CreateTexture::new()
+                    .dimensions(window.inner_size().width, window.inner_size().height, 1)
+                    .image_format(Format::R8G8B8A8_UNORM),
+            )
+            .unwrap();
         self.window = Some(window);
         self.context = Some(shared_graphics_context);
         self.device_context = Some(shared_device_context);
         self.swapchain = Some(swapchain);
+        self.texture_container = Some(texture_container);
+        self.texture_id = texture_id
     }
 
     fn window_event(
@@ -70,9 +79,12 @@ impl winit::application::ApplicationHandler for App {
                 self.resize();
             }
             winit::event::WindowEvent::RedrawRequested => {
-                if let (Some(context), Some(swapchain)) =
-                    (&self.device_context, &mut self.swapchain)
-                {
+                if let (Some(context), Some(swapchain), Some(texture_cont)) = (
+                    &self.device_context,
+                    &mut self.swapchain,
+                    &mut self.texture_container,
+                ) {
+                    let device = context;
                     let frame_data = swapchain.next_frame();
                     let frame_sync = frame_data.sync();
                     frame_sync.wait_until_frame_done(context);
@@ -94,10 +106,9 @@ impl winit::application::ApplicationHandler for App {
                                 float32: [1.0, 1.0, 1.0, 1.0],
                             },
                         ];
-
+                        let texture = texture_cont.get_image(self.texture_id).unwrap();
                         let command_buffer = command_pool.get_buffer(context);
                         let command_buffer_begin_info = CommandBufferBeginInfo::default();
-                        let device = context;
                         let screen_range = [ImageSubresourceRange::default()
                             .aspect_mask(ImageAspectFlags::COLOR)
                             .level_count(1)
@@ -107,7 +118,6 @@ impl winit::application::ApplicationHandler for App {
                                 .begin_command_buffer(command_buffer, &command_buffer_begin_info)
                                 .expect("ERR")
                         };
-                        let clear_color_value = clear_color_values[frame_data.fif_id()];
                         let swapchain_image = frame_data.image();
                         let image_barrier = [ImageMemoryBarrier::default()
                             .image(*swapchain_image)
@@ -116,6 +126,22 @@ impl winit::application::ApplicationHandler for App {
                             .src_access_mask(AccessFlags::empty())
                             .dst_access_mask(AccessFlags::TRANSFER_WRITE)
                             .subresource_range(screen_range[0])];
+                        let image_barrier_1 = [
+                            ImageMemoryBarrier::default()
+                                .image(*swapchain_image)
+                                .old_layout(ImageLayout::UNDEFINED)
+                                .new_layout(ImageLayout::TRANSFER_DST_OPTIMAL)
+                                .src_access_mask(AccessFlags::empty())
+                                .dst_access_mask(AccessFlags::TRANSFER_WRITE)
+                                .subresource_range(screen_range[0]),
+                            ImageMemoryBarrier::default()
+                                .image(texture.handle())
+                                .old_layout(ImageLayout::UNDEFINED)
+                                .new_layout(ImageLayout::TRANSFER_DST_OPTIMAL)
+                                .src_access_mask(AccessFlags::empty())
+                                .dst_access_mask(AccessFlags::TRANSFER_WRITE)
+                                .subresource_range(screen_range[0]),
+                        ];
 
                         unsafe {
                             device.cmd_pipeline_barrier(
@@ -125,12 +151,22 @@ impl winit::application::ApplicationHandler for App {
                                 DependencyFlags::empty(),
                                 &[],
                                 &[],
-                                &image_barrier,
+                                &image_barrier_1,
                             );
 
+                            let clear_color_value = clear_color_values[frame_data.fif_id()];
                             device.cmd_clear_color_image(
                                 command_buffer,
                                 *swapchain_image,
+                                ImageLayout::TRANSFER_DST_OPTIMAL,
+                                &clear_color_value,
+                                &screen_range,
+                            );
+                            let clear_color_value =
+                                clear_color_values[(frame_data.fif_id() + 1) % 2];
+                            device.cmd_clear_color_image(
+                                command_buffer,
+                                texture.handle(),
                                 ImageLayout::TRANSFER_DST_OPTIMAL,
                                 &clear_color_value,
                                 &screen_range,
@@ -187,6 +223,16 @@ impl App {
         if let (Some(graphics_context), Some(device_context), Some(window)) =
             (&self.context, &self.device_context, &self.window)
         {
+            if let Some(texture_cont) = &mut self.texture_container {
+                let texture_id = texture_cont
+                    .create_texture(
+                        device_context,
+                        CreateTexture::new()
+                            .dimensions(window.inner_size().width, window.inner_size().height, 1)
+                            .image_format(Format::R8G8B8A8_UNORM),
+                    )
+                    .unwrap();
+            }
             self.swapchain = if let Some(swapchain) = &mut self.swapchain {
                 println!("swapchain recreated");
                 Some(
