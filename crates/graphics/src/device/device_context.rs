@@ -1,9 +1,13 @@
-use std::{error::Error, ops::Deref};
+use std::{error::Error, ops::Deref, sync::{Mutex, MutexGuard}};
 
 use ash::{
     Device,
     khr::swapchain,
     vk::{DeviceCreateInfo, DeviceQueueCreateInfo},
+};
+use gpu_allocator::{
+    AllocatorDebugSettings,
+    vulkan::{Allocator, AllocatorCreateDesc},
 };
 
 use crate::{
@@ -15,6 +19,7 @@ pub struct DeviceContext {
     logical_device: Device,
     pdevice: PDevice,
     render_queue: RenderQueue,
+    alloc: Mutex<Allocator>,
 }
 impl DeviceContext {
     pub fn new(context: &GraphicsContext, pdevice: &PDevice) -> Result<Self, Box<dyn Error>> {
@@ -47,11 +52,20 @@ impl DeviceContext {
         let present_queue = Queue::new(present_queue, universal_queue);
 
         let render_queue = RenderQueue::new(graphics_queue, present_queue);
-
+        let alloc_createinfo = AllocatorCreateDesc {
+            instance: context.instance().instance().clone(),
+            device: device.clone(),
+            physical_device: pdevice.handle(),
+            debug_settings: AllocatorDebugSettings::default(),
+            buffer_device_address: false,
+            allocation_sizes: Default::default(),
+        };
+        let alloc = Mutex::new(Allocator::new(&alloc_createinfo)?);
         Ok(Self {
             logical_device: device,
             pdevice: pdevice.clone(),
             render_queue,
+            alloc,
         })
     }
     pub fn pdevice(&self) -> &PDevice {
@@ -59,6 +73,13 @@ impl DeviceContext {
     }
     pub fn render_queue(&self) -> &RenderQueue {
         &self.render_queue
+    }
+    
+    pub fn allocator(&self) -> MutexGuard<Allocator> {
+        if self.alloc.is_poisoned(){
+            self.alloc.clear_poison();
+        }
+        self.alloc.lock().unwrap()
     }
 }
 impl Deref for DeviceContext {

@@ -115,10 +115,10 @@ impl Instance {
             surface_khr: surface,
         })
     }
-    pub(crate) fn khr_surface(&self) -> SurfaceKHR {
+    pub fn khr_surface(&self) -> SurfaceKHR {
         self.surface_khr
     }
-    pub(crate) fn surface_instance(&self) -> &SI {
+    pub fn surface_instance(&self) -> &SI {
         &self.surface_instance
     }
     pub fn list_devices(&self) -> Result<Vec<PDevice>, Box<dyn Error>> {
@@ -133,7 +133,7 @@ impl Instance {
         });
         Ok(graphic_devices)
     }
-    pub(crate) fn instance(&self) -> &I {
+    pub fn instance(&self) -> &I {
         &self.instance
     }
 }
