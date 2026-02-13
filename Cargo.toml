@@ -12,5 +12,4 @@ simple_logger = "5.1"
 
 [workspace]
 members = ["crates/*"]
-exclude =["crates/crevice"]
 resolver = "2"
