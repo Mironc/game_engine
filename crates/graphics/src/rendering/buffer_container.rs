@@ -20,6 +20,7 @@ pub use graphics_macro::VertexData;
 pub use graphics_macro::{ShaderType, storage_data, uniform_data};
 
 /// Centralized container for storing all that related to buffers
+#[derive(Default)]
 pub struct BufferContainer {
     buffers: SlotMap<RawBufferId, GeneralBuffer>,
 }
@@ -31,11 +32,10 @@ impl BufferContainer {
     }
     /// Creates general (untyped) buffer
     ///
-    /// # Possible errors:
+    /// # Possible error types:
     /// - AllocationError
-    /// - InitializationError
     /// - VKError
-    fn create_general_buffer<T: GpuData>(
+    pub fn create_general_buffer<T: GpuData>(
         &mut self,
         device: &DeviceContext,
         usage: BufferUsage,
@@ -67,6 +67,7 @@ impl BufferContainer {
             linear: true,
             allocation_scheme: AllocationScheme::DedicatedBuffer(raw_buffer),
         })?;
+        unsafe { device.bind_buffer_memory(raw_buffer, alloc.memory(), alloc.offset()) }?;
 
         let buffer = GeneralBuffer {
             raw_buffer,
@@ -85,10 +86,7 @@ impl BufferContainer {
         })
     }
     /// Returns general (untyped) buffer if exists
-    fn get_general_buffer<T: GpuData>(
-        &self,
-        general_id: GeneralBufferId,
-    ) -> Option<&GeneralBuffer> {
+    pub fn get_general_buffer(&self, general_id: GeneralBufferId) -> Option<&GeneralBuffer> {
         self.buffers.get(general_id.key_data)
     }
     /// Creates `StorageBuffer` and returns `StorageBufferId`
@@ -114,7 +112,7 @@ impl BufferContainer {
         id: StorageBufferId<T>,
     ) -> Option<StorageBuffer<'a, T>> {
         Some(StorageBuffer {
-            gener: self.get_general_buffer::<T>(id.gener)?,
+            gener: self.get_general_buffer(id.gener)?,
             _marker: PhantomData {},
         })
     }
@@ -144,7 +142,7 @@ impl BufferContainer {
         id: UniformBufferId<T>,
     ) -> Option<UniformBuffer<'a, T>> {
         Some(UniformBuffer {
-            gener: self.get_general_buffer::<T>(id.gener)?,
+            gener: self.get_general_buffer(id.gener)?,
             _marker: PhantomData {},
         })
     }
@@ -171,7 +169,7 @@ impl BufferContainer {
         id: VertexBufferId<T>,
     ) -> Option<VertexBuffer<'a, T>> {
         Some(VertexBuffer {
-            gener: self.get_general_buffer::<T>(id.gener)?,
+            gener: self.get_general_buffer(id.gener)?,
             _marker: PhantomData {},
         })
     }
@@ -199,7 +197,7 @@ impl BufferContainer {
         id: IndexBufferId<T>,
     ) -> Option<IndexBuffer<'a, T>> {
         Some(IndexBuffer {
-            gener: self.get_general_buffer::<T>(id.gener)?,
+            gener: self.get_general_buffer(id.gener)?,
             _marker: PhantomData {},
         })
     }
@@ -217,7 +215,7 @@ pub enum BufferUsage {
 }
 
 /// Unique identifier to `GeneralBuffer` in a `BufferContainer` with extra information
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GeneralBufferId {
     key_data: RawBufferId,
     len: u64,
@@ -256,8 +254,8 @@ impl GeneralBuffer {
 
     /// Returns true if buffer is writeable from CPU
     ///
-    /// If it's false then you can not make `InsertSomethingMeaningful`,
-    /// but still you can upload data into different buffer and then copy its values into other one
+    /// If it's false then you can't write into buffer with code,
+    /// but still you can upload data into different buffer and then copy its values into the other one
     pub fn staging(&self) -> bool {
         self.staging
     }
@@ -271,9 +269,13 @@ impl GeneralBuffer {
     pub fn item_size(&self) -> u64 {
         self.item_size
     }
+
+    pub fn alloc(&self) -> &Allocation {
+        &self.alloc
+    }
 }
 /// General configuration parameters for creating a buffer
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct CreateBuffer<T: GpuData> {
     len: u64,
     staging: bool,
@@ -283,17 +285,33 @@ impl<T> CreateBuffer<T>
 where
     T: GpuData,
 {
+    pub fn new() -> Self {
+        Self::default()
+    }
     /// Sets length of buffer in respect to items
     pub fn len(mut self, len: u64) -> Self {
         self.len = len;
         self
     }
-    /// If set to true marks buffer as writeable from CPU (might be slower) 
+    /// If set to true marks buffer as writeable from CPU (might be slower)
     pub fn staging(mut self, staging: bool) -> Self {
         self.staging = staging;
         self
     }
 }
+impl<T> Default for CreateBuffer<T>
+where
+    T: GpuData,
+{
+    fn default() -> Self {
+        Self {
+            len: Default::default(),
+            staging: Default::default(),
+            _marker: Default::default(),
+        }
+    }
+}
+#[derive(Debug, Clone, Copy)]
 pub struct StorageBufferId<T: StorageData> {
     gener: GeneralBufferId,
     _marker: PhantomData<T>,
@@ -323,6 +341,7 @@ where
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct UniformBufferId<T: UniformData> {
     gener: GeneralBufferId,
     _marker: PhantomData<T>,
@@ -351,7 +370,7 @@ where
         &self.gener
     }
 }
-
+#[derive(Debug, Clone, Copy)]
 pub struct VertexBufferId<T: VertexData> {
     gener: GeneralBufferId,
     _marker: PhantomData<T>,
@@ -455,49 +474,73 @@ pub struct VertexAttribute {
     ///
     /// So if taken into account for vec4 it would be 1, for mat4 it would be 4
     binding_size: usize,
-    /// At which byte does field start, usually given by trait `ToVertexAttribute` via argument
+
+    location: usize,
+    /// At which byte does field start, given by trait `ToVertexAttribute` via argument
     offset: usize,
     /// What format is suitable for data-type
     format: AttributeFormat,
 }
 
+impl VertexAttribute {
+    pub fn binding_size(&self) -> usize {
+        self.binding_size
+    }
+
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
+    pub fn format(&self) -> AttributeFormat {
+        self.format
+    }
+
+    pub fn location(&self) -> usize {
+        self.location
+    }
+}
+
 /// Trait that converts field into `VertexAttribute`
 pub trait ToVertexAttribute {
-    fn to_attrib(offset: usize) -> Vec<VertexAttribute>;
+    fn to_attrib(offset: usize, location: usize) -> Vec<VertexAttribute>;
 }
 impl ToVertexAttribute for [f32; 4] {
-    fn to_attrib(offset: usize) -> Vec<VertexAttribute> {
+    fn to_attrib(offset: usize, location: usize) -> Vec<VertexAttribute> {
         vec![VertexAttribute {
             binding_size: 1,
+            location,
             offset,
             format: AttributeFormat::Vec4F32,
         }]
     }
 }
 impl ToVertexAttribute for [f32; 3] {
-    fn to_attrib(offset: usize) -> Vec<VertexAttribute> {
+    fn to_attrib(offset: usize, location: usize) -> Vec<VertexAttribute> {
         vec![VertexAttribute {
             binding_size: 1,
             offset,
             format: AttributeFormat::Vec3F32,
+            location,
         }]
     }
 }
 impl ToVertexAttribute for [f32; 2] {
-    fn to_attrib(offset: usize) -> Vec<VertexAttribute> {
+    fn to_attrib(offset: usize, location: usize) -> Vec<VertexAttribute> {
         vec![VertexAttribute {
             binding_size: 1,
             offset,
             format: AttributeFormat::Vec2F32,
+            location,
         }]
     }
 }
 impl ToVertexAttribute for f32 {
-    fn to_attrib(offset: usize) -> Vec<VertexAttribute> {
+    fn to_attrib(offset: usize, location: usize) -> Vec<VertexAttribute> {
         vec![VertexAttribute {
             binding_size: 1,
             offset,
             format: AttributeFormat::F32,
+            location,
         }]
     }
 }
@@ -505,7 +548,13 @@ impl ToVertexAttribute for f32 {
 ///
 /// This trait defines how Vulkan will be treating vertex buffer
 ///
-/// Trait only works with fields that implement `ToVertexAttribute`
+/// Trait only works with data types that implement `ToVertexAttribute`
 pub unsafe trait VertexData: GpuData {
     fn layout_info() -> Vec<Vec<VertexAttribute>>;
+}
+
+unsafe impl VertexData for () {
+    fn layout_info() -> Vec<Vec<VertexAttribute>> {
+        Vec::new()
+    }
 }

@@ -1,4 +1,5 @@
 mod dag;
+pub mod execution;
+pub mod operations;
 pub mod render_graph;
-pub mod gpu_operation;
 pub mod resource;

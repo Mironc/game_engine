@@ -2,7 +2,8 @@ use std::{collections::HashMap, error::Error};
 
 use ash::vk::{
     Extent3D, Format, Image, ImageAspectFlags, ImageCreateInfo, ImageLayout, ImageSubresourceRange,
-    ImageTiling, ImageType, ImageUsageFlags, ImageView, ImageViewCreateInfo, SampleCountFlags,
+    ImageTiling, ImageType, ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType,
+    SampleCountFlags,
 };
 use gpu_allocator::{
     MemoryLocation,
@@ -10,13 +11,17 @@ use gpu_allocator::{
 };
 use slotmap::{SlotMap, new_key_type};
 
-use crate::device::DeviceContext;
+use crate::{
+    device::DeviceContext,
+    swapchain::{FrameData, FrameImage},
+};
 
 /// Centralized container for managing all that related to textures, but not array of textures
+#[derive(Debug, Default)]
 pub struct TextureContainer {
     images: SlotMap<TextureId, Texture>,
-    image_views: SlotMap<TextureViewId, TextureView>,
-    image_view_to_image: HashMap<TextureViewId, TextureId>,
+    image_views: SlotMap<RawTextureViewId, TextureView>,
+    swapchain_frame: HashMap<FrameImage, (TextureId, TextureViewId)>,
 }
 impl TextureContainer {
     /// Creates empty `TextureContainer`
@@ -24,7 +29,7 @@ impl TextureContainer {
         Self {
             images: SlotMap::default(),
             image_views: SlotMap::default(),
-            image_view_to_image: HashMap::new(),
+            swapchain_frame: HashMap::new(),
         }
     }
 
@@ -49,7 +54,7 @@ impl TextureContainer {
             .extent(create.dimensions)
             .image_type(image_type)
             .initial_layout(ImageLayout::UNDEFINED)
-            .format(create.image_format)
+            .format(create.texture_format.to_image_format())
             .mip_levels(1)
             .array_layers(1)
             .usage(
@@ -76,7 +81,7 @@ impl TextureContainer {
             image,
             extent: create.dimensions,
             image_type,
-            format: create.image_format,
+            texture_format: create.texture_format,
         };
         Ok(self.images.insert(texture))
     }
@@ -92,17 +97,25 @@ impl TextureContainer {
                 .base_mip_level(0)
                 .aspect_mask(ImageAspectFlags::COLOR)
                 .base_array_layer(0)
-                .layer_count(1);
+                .layer_count(1)
+                .level_count(1);
             let image_view_createinfo = ImageViewCreateInfo::default()
-                .format(create.view_format)
+                .format(create.view_format.to_image_format())
+                .view_type(ImageViewType::TYPE_2D)
                 .image(self.images[texture_id].image)
                 .subresource_range(subresource);
             let texture = self.get_image(texture_id).unwrap();
             let image_view = unsafe { device.create_image_view(&image_view_createinfo, None) }?;
-            let texture_view = TextureView{ image_view, extent: texture.dimensions(), format: create.view_format };
-            let view_id = self.image_views.insert(texture_view);
-
-            self.image_view_to_image.insert(view_id, texture_id);
+            let texture_view = TextureView {
+                handle: image_view,
+                extent: texture.dimensions(),
+                format: create.view_format,
+            };
+            let raw_id = self.image_views.insert(texture_view);
+            let view_id = TextureViewId {
+                texture: texture_id,
+                raw_id,
+            };
             return Ok(view_id);
         }
         Err("No TextureId was provided".into())
@@ -119,27 +132,73 @@ impl TextureContainer {
     ///
     /// Returns `None` if texture has been destroyed or the `TextureViewId` is invalid
     pub fn get_image_view(&self, view_id: TextureViewId) -> Option<&TextureView> {
-        self.image_views.get(view_id)
+        self.image_views.get(view_id.raw_id)
     }
 
-    /// **FOR TESTING PURPOSES**
-    ///
-    /// Creates a dummy `Texture`
-    #[cfg(test)]
-    pub fn create_texture_null(&mut self) -> TextureId {
-        self.images.insert(Texture::default())
+    pub fn insert_framedata(&mut self, frame_data: &FrameData) -> (TextureId, TextureViewId) {
+        if let Some(res) = self.swapchain_frame.get(frame_data.image()) {
+            return *res;
+        }
+        let texture = Texture {
+            image: frame_data.image().image(),
+            alloc: Allocation::default(),
+            image_type: ImageType::TYPE_2D,
+            extent: Extent3D::from(frame_data.image().extent()),
+            texture_format: TextureFormat::Swapchain(frame_data.image().format()),
+        };
+        let texture_id = self.images.insert(texture);
+        let texture_view = TextureView {
+            handle: frame_data.image().image_view(),
+            extent: frame_data.image().extent().into(),
+            format: TextureFormat::Swapchain(frame_data.image().format()),
+        };
+        let raw_id = self.image_views.insert(texture_view);
+        let texture_view_id = TextureViewId {
+            texture: texture_id,
+            raw_id,
+        };
+        self.swapchain_frame
+            .insert(*frame_data.image(), (texture_id, texture_view_id));
+        log::info!(
+            "inserted framedata: {:?}\n swapchain frames: {:?}",
+            frame_data,
+            self.swapchain_frame
+        );
+        (texture_id, texture_view_id)
     }
+    pub fn remove_frameimage(
+        &mut self,
+        frame_image: &FrameImage,
+    ) -> Option<(TextureId, TextureViewId)> {
+        if let Some(ids) = self.swapchain_frame.get(frame_image) {
+            let ids = *ids;
+            self.image_views.remove(ids.1.raw_id);
+            self.images.remove(ids.0);
+            self.swapchain_frame.remove(frame_image);
+            Some(ids)
+        } else {
+            None
+        }
+    }
+    //TODO:IDK, it looks not really good
+    // /// **FOR TESTING PURPOSES**
+    // ///
+    // /// Creates a dummy `Texture`
+    // #[cfg(test)]
+    // pub fn create_texture_null(&mut self) -> TextureId {
+    //     self.images.insert(Texture::default())
+    // }
 
-    /// **FOR TESTING PURPOSES**
-    ///
-    /// Creates a dummy `TextureView`
-    #[cfg(test)]
-    pub fn create_texture_view_null(&mut self) -> TextureViewId {
-        self.image_views.insert(TextureView::default())
-    }
+    // /// **FOR TESTING PURPOSES**
+    // ///
+    // /// Creates a dummy `TextureView`
+    // #[cfg(test)]
+    // pub fn create_texture_view_null(&mut self) -> TextureViewId {
+    //     self.image_views.insert(TextureView::default())
+    // }
 }
 
-//TODO:Add reference counting for automatic dispose
+//TODO:Add reference counting for automatic dispose (IDK if this is a good idea)
 new_key_type! {
     /// Unique identifier to a `Texture` in a `TextureContainer`
     pub struct TextureId;
@@ -147,9 +206,19 @@ new_key_type! {
 
 new_key_type! {
     /// Unique identifier to a `TextureView` in a `TextureContainer`
-    pub struct TextureViewId;
+    pub struct RawTextureViewId;
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TextureViewId {
+    texture: TextureId,
+    raw_id: RawTextureViewId,
 }
 
+impl TextureViewId {
+    pub fn texture(&self) -> TextureId {
+        self.texture
+    }
+}
 /// A GPU-driven image resource.
 #[derive(Debug, Default)]
 pub struct Texture {
@@ -157,7 +226,7 @@ pub struct Texture {
     alloc: Allocation,
     image_type: ImageType,
     extent: Extent3D,
-    format: Format,
+    texture_format: TextureFormat,
     //TODO:Add mipmap level count
 }
 impl Texture {
@@ -172,8 +241,8 @@ impl Texture {
     }
 
     /// Returns the underlying image `Format`
-    pub fn format(&self) -> Format {
-        self.format
+    pub fn texture_format(&self) -> TextureFormat {
+        self.texture_format
     }
 
     /// Returns the dimensionality type of the texture (1D, 2D, or 3D).
@@ -190,7 +259,7 @@ impl Texture {
 #[derive(Debug, Clone, Default)]
 pub struct CreateTexture {
     dimensions: Extent3D,
-    image_format: Format,
+    texture_format: TextureFormat,
 }
 impl CreateTexture {
     /// Creates new `CreateTexture` with default values
@@ -208,34 +277,93 @@ impl CreateTexture {
         self
     }
 
-    /// Sets the image format
-    pub fn image_format(mut self, image_format: Format) -> Self {
-        self.image_format = image_format;
+    /// Sets the texture format
+    pub fn image_format(mut self, texture_format: TextureFormat) -> Self {
+        self.texture_format = texture_format;
         self
     }
 }
 
 /// A struct that define how renderer will read and write data into `Texture`
-#[derive(Debug,Default)]
+#[derive(Debug, Default)]
 pub struct TextureView {
-    image_view: ImageView,
+    handle: ImageView,
     extent: Extent3D,
-    format: Format,
+    format: TextureFormat,
     //TODO:Add mipmap level
+}
+impl TextureView {
+    pub fn handle(&self) -> ImageView {
+        self.handle
+    }
+
+    pub fn extent(&self) -> Extent3D {
+        self.extent
+    }
+
+    pub fn format(&self) -> TextureFormat {
+        self.format
+    }
 }
 /// Configuration parameters for creating a `TextureView`.
 #[derive(Debug, Clone, Default)]
 pub struct CreateTextureView {
     texture_id: Option<TextureId>,
-    view_format: Format,
+    view_format: TextureFormat,
 }
 impl CreateTextureView {
     pub fn new() -> Self {
         Self::default()
     }
-    /// Sets `TextureId` for the image view
+    /// Sets texture from which `TextureView` will be created
     pub fn texture_id(mut self, texture_id: TextureId) -> Self {
         self.texture_id = Some(texture_id);
         self
+    }
+    /// Sets `Format` for the TextureView
+    pub fn format(mut self, format: TextureFormat) -> Self {
+        self.view_format = format;
+        self
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TextureFormat {
+    R8G8B8A8,
+    B8G8R8A8,
+    R8G8,
+    Depth32F,
+    Depth24Stencil8,
+    Swapchain(Format),
+}
+impl TextureFormat {
+    pub fn is_color(&self) -> bool {
+        matches!(
+            self,
+            TextureFormat::R8G8B8A8
+                | TextureFormat::R8G8
+                | TextureFormat::B8G8R8A8
+                | Self::Swapchain(_)
+        )
+    }
+    pub fn is_depth(&self) -> bool {
+        matches!(self, TextureFormat::Depth32F)
+    }
+    pub fn is_depth_stencil(&self) -> bool {
+        matches!(self, TextureFormat::Depth24Stencil8)
+    }
+    pub fn to_image_format(&self) -> Format {
+        match self {
+            TextureFormat::R8G8B8A8 => Format::R8G8B8A8_UNORM,
+            TextureFormat::B8G8R8A8 => Format::B8G8R8A8_UNORM,
+            TextureFormat::R8G8 => Format::R8G8_UNORM,
+            TextureFormat::Depth32F => Format::D32_SFLOAT,
+            TextureFormat::Depth24Stencil8 => Format::D24_UNORM_S8_UINT,
+            TextureFormat::Swapchain(f) => *f,
+        }
+    }
+}
+impl Default for TextureFormat {
+    fn default() -> Self {
+        TextureFormat::R8G8B8A8
     }
 }

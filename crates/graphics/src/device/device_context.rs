@@ -1,7 +1,12 @@
-use std::{error::Error, ops::Deref, sync::{Mutex, MutexGuard}};
+use std::{
+    error::Error,
+    ops::Deref,
+    sync::{Mutex, MutexGuard},
+};
 
 use ash::{
     Device,
+    ext::debug_utils,
     khr::swapchain,
     vk::{DeviceCreateInfo, DeviceQueueCreateInfo},
 };
@@ -14,9 +19,9 @@ use crate::{
     context::GraphicsContext, device::graphics_queue::RenderQueue,
     device::physical_device::PDevice, queue::logical_queue::Queue,
 };
-
 pub struct DeviceContext {
     logical_device: Device,
+    debug_fns: debug_utils::Device,
     pdevice: PDevice,
     render_queue: RenderQueue,
     alloc: Mutex<Allocator>,
@@ -30,7 +35,7 @@ impl DeviceContext {
         create_queues.push(
             DeviceQueueCreateInfo::default()
                 .queue_family_index(universal_queue.id() as u32)
-                .queue_priorities(&[1.0, 1.0]),
+                .queue_priorities(&[1.0]),
         );
         let device_extensions_ptrs = [
             swapchain::NAME.as_ptr(),
@@ -48,7 +53,7 @@ impl DeviceContext {
         let graphics_queue = unsafe { device.get_device_queue(universal_queue.id() as u32, 0) };
         let graphics_queue = Queue::new(graphics_queue, universal_queue);
 
-        let present_queue = unsafe { device.get_device_queue(universal_queue.id() as u32, 1) };
+        let present_queue = unsafe { device.get_device_queue(universal_queue.id() as u32, 0) };
         let present_queue = Queue::new(present_queue, universal_queue);
 
         let render_queue = RenderQueue::new(graphics_queue, present_queue);
@@ -61,9 +66,11 @@ impl DeviceContext {
             allocation_sizes: Default::default(),
         };
         let alloc = Mutex::new(Allocator::new(&alloc_createinfo)?);
+        let debug_fns = debug_utils::Device::new(&context.instance(), &device);
         Ok(Self {
             logical_device: device,
             pdevice: pdevice.clone(),
+            debug_fns,
             render_queue,
             alloc,
         })
@@ -74,12 +81,16 @@ impl DeviceContext {
     pub fn render_queue(&self) -> &RenderQueue {
         &self.render_queue
     }
-    
-    pub fn allocator(&self) -> MutexGuard<Allocator> {
-        if self.alloc.is_poisoned(){
+
+    pub fn allocator(&self) -> MutexGuard<'_, Allocator> {
+        if self.alloc.is_poisoned() {
             self.alloc.clear_poison();
         }
         self.alloc.lock().unwrap()
+    }
+
+    pub fn debug_fns(&self) -> &debug_utils::Device {
+        &self.debug_fns
     }
 }
 impl Deref for DeviceContext {
@@ -87,5 +98,10 @@ impl Deref for DeviceContext {
 
     fn deref(&self) -> &Self::Target {
         &self.logical_device
+    }
+}
+impl Drop for DeviceContext {
+    fn drop(&mut self) {
+        unsafe { self.device_wait_idle().unwrap() }
     }
 }

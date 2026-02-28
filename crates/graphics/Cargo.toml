@@ -4,15 +4,23 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-gpu-allocator = { version = "0.28.0",default-features = false,features = ["std","vulkan"] }
-graphics-macro = {path = "../graphics-macro"}
 ash = "0.38"
 ash-window = "0.13"
-raw-window-handle = "0.6"
-encase = "0.12"
-log = { workspace = true }
-simple_logger = { workspace = true }
-winit = "0.30"
-image = "0.25"
-slotmap = "1.1.1"
 dashmap = "6.1.0"
+encase = "0.12"
+gpu-allocator = { version = "0.28.0", default-features = false, features = [
+  "std",
+  "vulkan",
+] }
+graphics-macro = { path = "../graphics-macro" }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+log = { workspace = true }
+naga = { version = "23.0", default-features = false, features = [
+  "glsl-in",
+  "spv-in",
+  "spv-out",
+] }
+raw-window-handle = "0.6"
+simple_logger = { workspace = true }
+slotmap = "1.1.1"
+winit = "0.30"
