@@ -2,6 +2,7 @@
 name = "graphics"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [dependencies]
 ash = "0.38"
@@ -12,7 +13,7 @@ gpu-allocator = { version = "0.28.0", default-features = false, features = [
   "std",
   "vulkan",
 ] }
-graphics-macro = { path = "../graphics-macro" }
+graphics-macro = { path = "graphics-macro" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 log = { workspace = true }
 naga = { version = "23.0", default-features = false, features = [
