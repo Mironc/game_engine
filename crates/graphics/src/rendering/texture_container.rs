@@ -3,7 +3,7 @@ use std::{collections::HashMap, error::Error};
 use ash::vk::{
     Extent3D, Format, Image, ImageAspectFlags, ImageCreateInfo, ImageLayout, ImageSubresourceRange,
     ImageTiling, ImageType, ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType,
-    SampleCountFlags,
+    SampleCountFlags, SamplerAddressMode, SamplerCreateInfo, SamplerMipmapMode,
 };
 use gpu_allocator::{
     MemoryLocation,
@@ -21,6 +21,7 @@ use crate::{
 pub struct TextureContainer {
     images: SlotMap<TextureId, Texture>,
     image_views: SlotMap<RawTextureViewId, TextureView>,
+    samplers: HashMap<SamplingOptions, TextureSampler>,
     swapchain_frame: HashMap<FrameImage, (TextureId, TextureViewId)>,
 }
 impl TextureContainer {
@@ -29,6 +30,7 @@ impl TextureContainer {
         Self {
             images: SlotMap::default(),
             image_views: SlotMap::default(),
+            samplers: HashMap::new(),
             swapchain_frame: HashMap::new(),
         }
     }
@@ -178,6 +180,28 @@ impl TextureContainer {
             Some(ids)
         } else {
             None
+        }
+    }
+    pub(crate) fn get_sampler(
+        &mut self,
+        device: &DeviceContext,
+        options: SamplingOptions,
+    ) -> Option<TextureSampler> {
+        if let Some(&sampler) = self.samplers.get(&options) {
+            return Some(sampler);
+        } else {
+            let sampler_createinfo = SamplerCreateInfo::default()
+                .anisotropy_enable(false)
+                .max_anisotropy(1.0)
+                .address_mode_u(options.wrap_x.into_address_mode())
+                .address_mode_v(options.wrap_y.into_address_mode())
+                .mag_filter(options.mag_filter.into_vk_filter())
+                .min_filter(options.min_filter.into_vk_filter())
+                .unnormalized_coordinates(false);
+            let handle = unsafe { device.create_sampler(&sampler_createinfo, None) }.ok()?;
+            let sampler = TextureSampler { handle, options };
+            self.samplers.insert(options, sampler);
+            Some(sampler)
         }
     }
     //TODO:IDK, it looks not really good
@@ -365,5 +389,61 @@ impl TextureFormat {
 impl Default for TextureFormat {
     fn default() -> Self {
         TextureFormat::R8G8B8A8
+    }
+}
+#[derive(Debug, Clone, Copy)]
+pub struct TextureSampler {
+    handle: ash::vk::Sampler,
+    options: SamplingOptions,
+}
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SamplingOptions {
+    mag_filter: Filter,
+    min_filter: Filter,
+    wrap_x: WrapOption,
+    wrap_y: WrapOption,
+}
+impl SamplingOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn filter(mut self, filter: Filter) -> Self {
+        self.mag_filter = filter;
+        self.min_filter = filter;
+        self
+    }
+    pub fn wrap(mut self, wrap: WrapOption) -> Self {
+        self.wrap_x = wrap;
+        self.wrap_y = wrap;
+        self
+    }
+}
+
+// TODO: Add more options
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Filter {
+    #[default]
+    Point,
+    Linear,
+}
+impl Filter {
+    pub fn into_vk_filter(&self) -> ash::vk::Filter {
+        match self {
+            Filter::Point => ash::vk::Filter::NEAREST,
+            Filter::Linear => ash::vk::Filter::LINEAR,
+        }
+    }
+}
+// TODO:Add more options
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WrapOption {
+    #[default]
+    Repeat,
+}
+impl WrapOption {
+    pub fn into_address_mode(&self) -> SamplerAddressMode {
+        match self {
+            WrapOption::Repeat => SamplerAddressMode::REPEAT,
+        }
     }
 }
