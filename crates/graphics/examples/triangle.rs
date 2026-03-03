@@ -1,29 +1,24 @@
 use std::sync::Arc;
-use std::time::Instant;
 
-use ash::vk::{ImageLayout, PipelineStageFlags};
+use ash::vk::ImageLayout;
 use graphics::context::GraphicsContext;
 use graphics::device::DeviceContext;
 use graphics::render_graph::execution::{EasyExecutor, Executor};
 use graphics::render_graph::operations::draw_call::{DrawCall, DrawGeometry, DrawParameters};
-use graphics::render_graph::operations::gpu_operation::{Operation, WriteBufferOp};
+use graphics::render_graph::operations::gpu_operation::Operation;
 use graphics::render_graph::render_graph::RenderGraph;
-use graphics::rendering;
-use graphics::rendering::buffer_container::{CreateBuffer, VertexBufferId};
-use graphics::rendering::descriptor_container::DescriptorId;
-use graphics::rendering::framebuffer_container::{FramebufferCreate, FramebufferId};
-use graphics::rendering::pipeline_container::{CreatePipeline, PipelineContainer, PipelineId};
+use graphics::rendering::framebuffer_container::FramebufferCreate;
+use graphics::rendering::pipeline_container::{CreatePipeline, PipelineId};
 use graphics::rendering::render_pass_container::{
     LoadOption, RenderPassAttachment, RenderPassDescription, StoreOption, SubPass,
 };
 use graphics::rendering::renderer_bundle::RendererBundle;
 use graphics::rendering::shader_container::ShaderType;
-use graphics::rendering::texture_container::{CreateTexture, CreateTextureView, TextureFormat};
+use graphics::rendering::texture_container::TextureFormat;
 use graphics::swapchain::SwapChain;
-use graphics_macro::{VertexData, uniform_data};
 use winit::event::WindowEvent;
 use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::{Fullscreen, Window, WindowAttributes};
+use winit::window::{Window, WindowAttributes};
 
 #[derive(Default)]
 pub struct App {
@@ -34,8 +29,6 @@ pub struct App {
     bundle: Option<RendererBundle>,
     pipeline_id: Option<PipelineId>,
     render_graph: Option<RenderGraph>,
-    descriptor_id: Option<[DescriptorId; 2]>,
-    instant: Option<Instant>,
 }
 impl winit::application::ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
@@ -104,13 +97,8 @@ impl winit::application::ApplicationHandler for App {
                     vec3(0.0, 1.0, 0.0),
                     vec3(0.0, 0.0, 1.0)
                 );
-
-
-                layout(push_constant) uniform PushConstants {
-                    float time;
-                };
                 void main() {
-                    gl_Position = vec4(positions[gl_VertexIndex]*abs(sin(time)), 1.0);
+                    gl_Position = vec4(positions[gl_VertexIndex], 1.0);
                     fragColor = colors[gl_VertexIndex];
                 }",
                 ShaderType::Vertex,
@@ -123,12 +111,9 @@ impl winit::application::ApplicationHandler for App {
 
             layout(location = 0) in vec3 fragColor;
             layout(location = 0) out vec4 outColor;
-            layout(set = 0,binding = 0) uniform UniformExample{
-                vec3 balance;
-            } ue;
 
             void main() {
-                outColor = vec4(fragColor+ue.balance, 1.0);
+                outColor = vec4(fragColor, 1.0);
             }",
                 ShaderType::Fragment,
             )
@@ -144,58 +129,13 @@ impl winit::application::ApplicationHandler for App {
                     .render_pass(&render_pass),
             )
             .unwrap();
-        let uniform_buf = bundle
-            .buffer_container
-            .create_uniform_buffer(
-                &shared_device_context,
-                CreateBuffer::<SimpleUniform>::new().len(1).staging(true),
-            )
-            .unwrap();
         let pipeline = bundle
             .pipeline_container
             .get(pipeline_id)
             .unwrap()
             .pipeline_layout()
             .shader_layout();
-        println!("Before descriptor creation");
-        let mut descriptor_group = bundle
-            .descriptor_container
-            .create_descriptor_set(&shared_device_context, pipeline.clone())
-            .unwrap();
-        descriptor_group.set_uniform_buffer("ue", uniform_buf);
-        bundle.descriptor_container.apply_changes(
-            &shared_device_context,
-            &descriptor_group,
-            &bundle.buffer_container,
-        );
-        let mut descriptor_group_2 = bundle
-            .descriptor_container
-            .create_descriptor_set(&shared_device_context, pipeline.clone())
-            .unwrap();
-        descriptor_group_2.set_uniform_buffer("ue", uniform_buf);
-        bundle.descriptor_container.apply_changes(
-            &shared_device_context,
-            &descriptor_group_2,
-            &bundle.buffer_container,
-        );
-        println!("Before writeop");
         let mut render_graph = RenderGraph::new();
-        render_graph.add_operation(Operation::WriteBuffer(
-            WriteBufferOp::uniform_buffer(
-                uniform_buf,
-                [SimpleUniform {
-                    color_balance: Color3 {
-                        r: 0.2,
-                        g: 0.2,
-                        b: 0.3,
-                    },
-                }]
-                .to_vec(),
-                0,
-            )
-            .unwrap(),
-        ));
-        println!("After writeop");
         self.window = Some(window);
         self.context = Some(shared_graphics_context);
         self.device_context = Some(shared_device_context);
@@ -203,10 +143,10 @@ impl winit::application::ApplicationHandler for App {
         self.bundle = Some(bundle);
         self.render_graph = Some(render_graph);
         self.pipeline_id = Some(pipeline_id);
-        self.descriptor_id = Some([descriptor_group, descriptor_group_2]);
-        self.instant = Some(Instant::now());
     }
-
+    fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        self.window.as_ref().map(|x| x.request_redraw());
+    }
     fn window_event(
         &mut self,
         event_loop: &winit::event_loop::ActiveEventLoop,
@@ -225,16 +165,12 @@ impl winit::application::ApplicationHandler for App {
                     Some(bundle),
                     Some(pipeline_id),
                     Some(render_graph),
-                    Some(instant),
-                    Some(descs),
                 ) = (
                     &self.device_context,
                     &mut self.swapchain,
                     &mut self.bundle,
                     self.pipeline_id,
                     &mut self.render_graph,
-                    self.instant,
-                    &mut self.descriptor_id,
                 ) {
                     let device = context;
                     let frame_data = swapchain.next_frame(device);
@@ -248,8 +184,6 @@ impl winit::application::ApplicationHandler for App {
                         .reset(device);
                     let pipeline = bundle.pipeline_container.get(pipeline_id).unwrap();
                     let (texture, view) = bundle.texture_container.insert_framedata(&frame_data);
-
-                    let desc = &descs[frame_data.fif_id()];
                     let framebuffer_id = bundle
                         .framebuffer_container
                         .insert_framebuffer(
@@ -259,18 +193,13 @@ impl winit::application::ApplicationHandler for App {
                         )
                         .unwrap();
 
-                    let mut writer = pipeline
-                        .pipeline_layout()
-                        .shader_layout()
-                        .get_push_constant_writer();
-                    writer.f32("time", instant.elapsed().as_secs_f32());
                     render_graph.add_target_op(Operation::DrawCall(DrawCall::Direct {
                         draw_param: DrawParameters::new(
                             DrawGeometry::Procedural { count: 3 },
                             framebuffer_id,
                             pipeline_id,
-                            Some(&writer),
-                            Some(desc.clone()),
+                            None,
+                            None,
                         ),
                     }));
                     let executor = EasyExecutor {
@@ -305,7 +234,6 @@ impl winit::application::ApplicationHandler for App {
             }
             _ => (),
         }
-        self.window.as_ref().map(|x| x.request_redraw());
     }
 }
 impl App {
@@ -347,23 +275,4 @@ fn main() {
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App::default();
     event_loop.run_app(&mut app).unwrap();
-}
-#[derive(Debug, Clone, Copy, VertexData)]
-#[repr(C)]
-
-pub struct SimpleVertex {
-    position: [f32; 3],
-    color: [f32; 3],
-}
-#[uniform_data]
-#[derive(Clone, Copy)]
-pub struct SimpleUniform {
-    color_balance: Color3,
-}
-#[uniform_data]
-#[derive(Debug, Clone, Copy)]
-pub struct Color3 {
-    r: f32,
-    g: f32,
-    b: f32,
 }
