@@ -16,9 +16,8 @@ gpu-allocator = { version = "0.28.0", default-features = false, features = [
 graphics-macro = { path = "graphics-macro" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 log = { workspace = true }
-naga = { version = "23.0", default-features = false, features = [
+naga = { version = "25.0.1", default-features = false, features = [
   "glsl-in",
-  "spv-in",
   "spv-out",
 ] }
 raw-window-handle = "0.6"
