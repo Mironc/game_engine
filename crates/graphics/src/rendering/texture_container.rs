@@ -21,7 +21,7 @@ use crate::{
 pub struct TextureContainer {
     images: SlotMap<TextureId, Texture>,
     image_views: SlotMap<RawTextureViewId, TextureView>,
-    samplers: HashMap<SamplingOptions, TextureSampler>,
+    samplers: HashMap<SamplingOptions, Sampler>,
     swapchain_frame: HashMap<FrameImage, (TextureId, TextureViewId)>,
 }
 impl TextureContainer {
@@ -186,7 +186,7 @@ impl TextureContainer {
         &mut self,
         device: &DeviceContext,
         options: SamplingOptions,
-    ) -> Option<TextureSampler> {
+    ) -> Option<Sampler> {
         if let Some(&sampler) = self.samplers.get(&options) {
             return Some(sampler);
         } else {
@@ -199,7 +199,7 @@ impl TextureContainer {
                 .min_filter(options.min_filter.into_vk_filter())
                 .unnormalized_coordinates(false);
             let handle = unsafe { device.create_sampler(&sampler_createinfo, None) }.ok()?;
-            let sampler = TextureSampler { handle, options };
+            let sampler = Sampler { handle, options };
             self.samplers.insert(options, sampler);
             Some(sampler)
         }
@@ -391,10 +391,17 @@ impl Default for TextureFormat {
         TextureFormat::R8G8B8A8
     }
 }
+
 #[derive(Debug, Clone, Copy)]
-pub struct TextureSampler {
+pub struct Sampler {
     handle: ash::vk::Sampler,
     options: SamplingOptions,
+}
+
+impl Sampler {
+    pub fn handle(&self) -> ash::vk::Sampler {
+        self.handle
+    }
 }
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SamplingOptions {

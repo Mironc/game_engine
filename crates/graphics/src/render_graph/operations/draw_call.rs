@@ -1,7 +1,7 @@
 use ash::vk::{
     self, AccessFlags, ClearColorValue, ClearValue, CommandBuffer, DescriptorBufferInfo, Extent2D,
-    PipelineBindPoint, PipelineStageFlags, RenderPassBeginInfo, ShaderStageFlags, SubpassContents,
-    WriteDescriptorSet,
+    ImageLayout, PipelineBindPoint, PipelineStageFlags, RenderPassBeginInfo, ShaderStageFlags,
+    SubpassContents, WriteDescriptorSet,
 };
 use log::warn;
 
@@ -202,7 +202,19 @@ impl DrawParameters {
                                 ), //as far as I know they cannot be changed in shaders
                             )
                         }
-                        BindedRes::Image(texture_view_id) => todo!(),
+                        BindedRes::Texture(texture_view_id) => {
+                            let bind_point = shader_to_pipeline_stage(desc_bind.stage_flags);
+                            ResourceState::new(
+                                ResourceId::Texture(texture_view_id.texture()),
+                                ResourceUsage::Texture(
+                                    ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                                    bind_point,
+                                    AccessFlags::SHADER_READ,
+                                    ResourceAccess::Read,
+                                ),
+                            )
+                        }
+                        BindedRes::Sampler(_) => continue,
                     };
                     resource_state.push(res_state);
                 }
@@ -302,14 +314,16 @@ impl DrawParameters {
             }
             if let Some(desc_id) = &self.desc {
                 if let Some(descriptor) = bundle.descriptor_container.get_descriptor(desc_id.id()) {
-                    device.cmd_bind_descriptor_sets(
-                        command_buffer,
-                        PipelineBindPoint::GRAPHICS,
-                        pipeline.pipeline_layout().pipeline_layout(),
-                        0,
-                        &descriptor.handles(),
-                        &[],
-                    );
+                    if !descriptor.binded().is_empty() {
+                        device.cmd_bind_descriptor_sets(
+                            command_buffer,
+                            PipelineBindPoint::GRAPHICS,
+                            pipeline.pipeline_layout().pipeline_layout(),
+                            0,
+                            &descriptor.handles(),
+                            &[],
+                        );
+                    }
                 }
             }
             match self.geometry {

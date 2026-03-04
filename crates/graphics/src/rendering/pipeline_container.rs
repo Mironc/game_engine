@@ -118,6 +118,7 @@ impl PipelineContainer {
             .vertex_binding_descriptions(&vertex_binding_descs)
             .vertex_attribute_descriptions(&vertex_attribute_descs);
 
+        // TODO:Make those not hardcoded
         let input_assembly_info = PipelineInputAssemblyStateCreateInfo::default()
             .topology(PrimitiveTopology::TRIANGLE_LIST)
             .primitive_restart_enable(false);
@@ -172,10 +173,15 @@ impl PipelineContainer {
             for s in combined_layout.push_constants.iter() {
                 stages |= s.stage_flags;
             }
-            let ranges = [PushConstantRange::default()
-                .offset(0)
-                .size(128)
-                .stage_flags(stages)];
+            let ranges = if combined_layout.push_constants.is_empty() {
+                [].to_vec()
+            } else {
+                [PushConstantRange::default()
+                    .offset(0)
+                    .size(128)
+                    .stage_flags(stages)]
+                .to_vec()
+            };
             let layout_info = PipelineLayoutCreateInfo::default()
                 .set_layouts(&layouts)
                 .push_constant_ranges(&ranges);

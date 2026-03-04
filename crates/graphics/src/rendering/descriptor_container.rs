@@ -1,9 +1,9 @@
 use std::{collections::HashMap, error::Error, thread::ThreadId};
 
 use ash::vk::{
-    DescriptorBufferInfo, DescriptorPool, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
-    DescriptorPoolSize, DescriptorSetAllocateInfo, DescriptorSetLayout, DescriptorType,
-    PipelineStageFlags, WriteDescriptorSet,
+    DescriptorBufferInfo, DescriptorImageInfo, DescriptorPool, DescriptorPoolCreateFlags,
+    DescriptorPoolCreateInfo, DescriptorPoolSize, DescriptorSetAllocateInfo, DescriptorSetLayout,
+    DescriptorType, ImageLayout, PipelineStageFlags, WriteDescriptorSet,
 };
 use slotmap::SlotMap;
 
@@ -12,7 +12,7 @@ use crate::{
     rendering::{
         buffer_container::{BufferContainer, GeneralBufferId, UniformBufferId, UniformData},
         shader_container::{DescriptorBinding, ShaderLayout},
-        texture_container::TextureViewId,
+        texture_container::{SamplingOptions, TextureContainer, TextureViewId},
     },
 };
 
@@ -93,6 +93,8 @@ impl DescriptorContainer {
             id,
             name_to_binding: shader_layout.name_to_bind().clone(),
             set_buffers: HashMap::new(),
+            set_samplers: HashMap::new(),
+            set_textures: HashMap::new(),
         };
         Ok(desc_id)
     }
@@ -101,6 +103,7 @@ impl DescriptorContainer {
         device: &DeviceContext,
         writer: &DescriptorId,
         buffer_container: &BufferContainer,
+        texture_container: &mut TextureContainer,
     ) -> Option<()> {
         if let Some(sets) = self.descriptors.get_mut(writer.id()) {
             let buffers = writer
@@ -135,12 +138,76 @@ impl DescriptorContainer {
                     )
                 })
                 .collect::<Vec<WriteDescriptorSet>>();
-            unsafe { device.update_descriptor_sets(&buf_writes, &[]) };
+
+            let samplers = writer.set_samplers.iter().filter_map(|x| {
+                if let Some(options) = texture_container.get_sampler(device, *x.1).map(|x|x.handle()) {
+                    Some((
+                        [DescriptorImageInfo::default().sampler(options)]
+                        .to_vec(),
+                        *x.0,
+                    ))
+                } else {
+                    log::warn!("failed writing sampled texture into descriptor set, texture view with id {:?} does not exists",x.0);
+                    None
+                }
+            }).collect::<Vec<(Vec<DescriptorImageInfo>,DescriptorBinding)>>();
+            let textures = writer.set_textures.iter().filter_map(|x|
+                if let Some(buff) = texture_container.get_image_view(*x.1) {
+                    Some((
+                        [DescriptorImageInfo::default().image_layout(ImageLayout::SHADER_READ_ONLY_OPTIMAL).image_view(buff.handle())]
+                        .to_vec(),
+                        *x.0,
+                    ))
+                } else {
+                    log::warn!("failed writing sampled texture into descriptor set, texture view with id {:?} does not exists",x.0);
+                    None
+                }
+            ).collect::<Vec<(Vec<DescriptorImageInfo>,DescriptorBinding)>>();
+            let sampler_writes = samplers
+                .iter()
+                .filter_map(|x| {
+                    Some(
+                        WriteDescriptorSet::default()
+                            .image_info(&x.0)
+                            .descriptor_count(1)
+                            .dst_set(sets.handles()[x.1.set as usize])
+                            .dst_binding(x.1.binding)
+                            .descriptor_type(DescriptorType::SAMPLER),
+                    )
+                })
+                .collect::<Vec<WriteDescriptorSet>>();
+            let texture_writes = textures
+                .iter()
+                .filter_map(|x| {
+                    Some(
+                        WriteDescriptorSet::default()
+                            .image_info(&x.0)
+                            .descriptor_count(1)
+                            .dst_set(sets.handles()[x.1.set as usize])
+                            .dst_binding(x.1.binding)
+                            .descriptor_type(DescriptorType::SAMPLED_IMAGE),
+                    )
+                })
+                .collect::<Vec<WriteDescriptorSet>>();
+            let writes = buf_writes
+                .into_iter()
+                .chain(sampler_writes)
+                .chain(texture_writes)
+                .collect::<Vec<WriteDescriptorSet>>();
+
+            unsafe { device.update_descriptor_sets(&writes, &[]) };
             for buf in writer.set_buffers().iter() {
                 sets.binded.insert(
                     *buf.0,
                     BindedRes::Buffer(*buf.1, 0, buf.1.len() * buf.1.item_size()),
                 ); // todo: Add offset and size parameters
+            }
+            for sampler in writer.set_samplers.iter() {
+                sets.binded
+                    .insert(*sampler.0, BindedRes::Sampler(*sampler.1));
+            }
+            for tex in writer.set_textures.iter() {
+                sets.binded.insert(*tex.0, BindedRes::Texture(*tex.1)); // todo: Add offset and size parameters
             }
             Some(())
         } else {
@@ -187,6 +254,8 @@ pub struct DescriptorId {
     id: RawDescriptorId,
     name_to_binding: HashMap<String, DescriptorBinding>,
     set_buffers: HashMap<DescriptorBinding, GeneralBufferId>,
+    set_samplers: HashMap<DescriptorBinding, SamplingOptions>,
+    set_textures: HashMap<DescriptorBinding, TextureViewId>,
 }
 impl DescriptorId {
     pub fn set_uniform_buffer<U: UniformData>(
@@ -207,7 +276,30 @@ impl DescriptorId {
         self.set_buffers.insert(*binding, *buffer);
         Some(())
     }
-
+    pub fn set_sampler(&mut self, name: &str, sampling_options: SamplingOptions) -> Option<()> {
+        let binding = self.name_to_binding.get(name)?;
+        if binding.ty != DescriptorType::SAMPLER {
+            log::warn!(
+                "Tried to set sampler to binding with type of {:?}",
+                binding.ty
+            );
+            return None;
+        }
+        self.set_samplers.insert(*binding, sampling_options);
+        Some(())
+    }
+    pub fn set_texture(&mut self, name: &str, texture: TextureViewId) -> Option<()> {
+        let binding = self.name_to_binding.get(name)?;
+        if binding.ty != DescriptorType::SAMPLED_IMAGE {
+            log::warn!(
+                "Tried to set texture to binding with type of {:?}",
+                binding.ty
+            );
+            return None;
+        }
+        self.set_textures.insert(*binding, texture);
+        Some(())
+    }
     pub fn id(&self) -> RawDescriptorId {
         self.id
     }
@@ -217,8 +309,9 @@ impl DescriptorId {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BindedRes {
     Buffer(GeneralBufferId, u64, u64),
-    Image(TextureViewId),
+    Sampler(SamplingOptions),
+    Texture(TextureViewId),
 }

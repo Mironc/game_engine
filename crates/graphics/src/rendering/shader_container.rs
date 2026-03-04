@@ -1,16 +1,11 @@
 use std::collections::HashMap;
 use std::error::Error;
 
-use ash::vk::{self, DescriptorPoolSize, DescriptorType, PushConstantRange, WriteDescriptorSet};
+use ash::vk::{self, DescriptorPoolSize, DescriptorType, PushConstantRange};
 use encase::internal::BufferMut;
-use naga::back::spv::{self, DebugInfo, PipelineOptions};
-use naga::front::glsl::Options;
-use naga::valid::{Capabilities, ValidationFlags, Validator};
-use naga::{AddressSpace, ResourceBinding};
+use naga::AddressSpace;
+use naga::back::spv::PipelineOptions;
 use slotmap::SlotMap;
-
-use crate::rendering::buffer_container::{GeneralBufferId, UniformBufferId, UniformData};
-use crate::rendering::descriptor_container::RawDescriptorId;
 
 #[derive(Debug, Default)]
 pub struct ShaderContainer {
@@ -29,16 +24,20 @@ impl ShaderContainer {
         // reading source glsl
         let mut parser = naga::front::glsl::Frontend::default();
         let options = naga::front::glsl::Options::from(shader_type.into_stage());
-        let module = parser.parse(&options, &shader_source).unwrap();
+        let module = parser
+            .parse(&options, &shader_source)
+            .map_err(|e| eprintln!("{}", e.emit_to_string(shader_source)))
+            .unwrap();
 
         let options = naga::back::spv::Options::default();
-        let module_info: naga::valid::ModuleInfo = naga::valid::Validator::new(
+        let module_info = naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),
         )
         .subgroup_stages(naga::valid::ShaderStages::all())
         .subgroup_operations(naga::valid::SubgroupOperationSet::all())
         .validate(&module)
+        .map_err(|x| eprintln!("{}", x.emit_to_string(shader_source)))
         .unwrap();
 
         // Reflection
