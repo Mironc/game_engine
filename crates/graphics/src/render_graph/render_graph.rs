@@ -154,7 +154,7 @@ pub enum Action {
 impl Action {
     pub fn execute(
         &self,
-        bundle: &RendererBundle,
+        bundle: &mut RendererBundle,
         command_buffer: CommandBuffer,
         device: &DeviceContext,
     ) {

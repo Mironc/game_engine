@@ -1,5 +1,11 @@
-use ash::vk::{AccessFlags, CommandBuffer, ImageLayout, PipelineStageFlags};
+use ash::vk::{
+    AccessFlags, BufferImageCopy, CommandBuffer, ImageAspectFlags, ImageLayout, ImageSubresource,
+    ImageSubresourceLayers, Offset3D, PipelineStageFlags,
+};
 use encase::DynamicUniformBuffer;
+use image::{
+    DynamicImage, EncodableLayout, GenericImageView, RgbaImage, imageops::FilterType::Lanczos3,
+};
 
 use crate::{
     device::DeviceContext,
@@ -10,18 +16,20 @@ use crate::{
     },
     rendering::{
         buffer_container::{
-            GeneralBufferId, UniformBufferId, UniformData, VertexBufferId, VertexData,
+            BufferUsage, CreateBuffer, GeneralBufferId, UniformBufferId, UniformData,
+            VertexBufferId, VertexData,
         },
         renderer_bundle::RendererBundle,
-        texture_container::TextureViewId,
+        texture_container::{TextureId, TextureViewId},
     },
     swapchain::FrameData,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Operation {
     DrawCall(DrawCall),
     WriteBuffer(WriteBufferOp),
+    UploadImage(UploadImageOp),
     Present(FrameData),
 }
 impl Operation {
@@ -61,13 +69,28 @@ impl Operation {
                     .to_vec(),
                 )
             }
+            Operation::UploadImage(upload_image_op) => {
+                let res = ResourceId::Texture(upload_image_op.texture_id);
+                Some(
+                    [ResourceState::new(
+                        res,
+                        ResourceUsage::Texture(
+                            ImageLayout::TRANSFER_DST_OPTIMAL,
+                            PipelineStageFlags::TRANSFER,
+                            AccessFlags::TRANSFER_WRITE,
+                            ResourceAccess::Read,
+                        ),
+                    )]
+                    .to_vec(),
+                )
+            }
         }
     }
     pub fn execute(
         &self,
         device: &DeviceContext,
         command_buffer: CommandBuffer,
-        bundle: &RendererBundle,
+        bundle: &mut RendererBundle,
     ) {
         match self {
             Operation::DrawCall(draw_call) => {
@@ -79,6 +102,9 @@ impl Operation {
             Operation::Present(_) => {
                 //nothing cuz we need only to sync image
                 ()
+            }
+            Operation::UploadImage(upload_image_op) => {
+                upload_image_op.execute(command_buffer, bundle, device);
             }
         }
     }
@@ -140,7 +166,6 @@ impl WriteBufferOp {
             offset_bytes,
         })
     }
-    //pub fn resource_state(&self) -> ResourceState {}
     pub fn execute(&self, bundle: &RendererBundle, device: &DeviceContext) {
         let buff = bundle
             .buffer_container
@@ -168,5 +193,81 @@ impl WriteBufferOp {
                     .size(allocation.size())])
                 .unwrap()
         };
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UploadImageOp {
+    image: RgbaImage,
+    texture_id: TextureId,
+}
+
+impl UploadImageOp {
+    pub fn new(image: RgbaImage, texture_id: TextureId) -> Self {
+        Self { image, texture_id }
+    }
+    pub fn execute(
+        &self,
+        command_buffer: CommandBuffer,
+        bundle: &mut RendererBundle,
+        device: &DeviceContext,
+    ) -> Option<()> {
+        const PX_SIZE: u64 = 4;
+        let texture = bundle.texture_container.get_image(self.texture_id)?;
+        let px_count = (self.image.dimensions().0 * self.image.dimensions().1) as u64;
+        let buff = bundle
+            .buffer_container
+            .create_general_buffer(
+                device,
+                BufferUsage::Staging,
+                PX_SIZE,
+                CreateBuffer::<()>::new().len(px_count).staging(true),
+            )
+            .unwrap();
+        let buff = bundle.buffer_container.get_general_buffer(buff)?;
+        let allocation = buff.alloc();
+        let size = px_count * PX_SIZE;
+        let data = self.image.as_bytes();
+
+        if let Some(ptr) = allocation.mapped_ptr() {
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    data.as_ptr() as *const u8,
+                    ptr.as_ptr() as *mut u8,
+                    size as usize,
+                );
+            }
+        } else {
+            log::error!("Buffer does not support mapping");
+        }
+        let buffer_image_copy = [BufferImageCopy::default()
+            .buffer_row_length(texture.dimensions().width)
+            .buffer_image_height(texture.dimensions().height)
+            .buffer_offset(0)
+            .image_extent(texture.dimensions())
+            .image_offset(Offset3D::default())
+            .image_subresource(
+                ImageSubresourceLayers::default()
+                    .mip_level(1)
+                    .mip_level(0)
+                    .layer_count(1)
+                    .aspect_mask(ImageAspectFlags::COLOR),
+            )];
+        unsafe {
+            device
+                .flush_mapped_memory_ranges(&[ash::vk::MappedMemoryRange::default()
+                    .memory(allocation.memory())
+                    .offset(allocation.offset())
+                    .size(allocation.size())])
+                .unwrap();
+            device.cmd_copy_buffer_to_image(
+                command_buffer,
+                buff.handle(),
+                texture.handle(),
+                ImageLayout::TRANSFER_DST_OPTIMAL,
+                &buffer_image_copy,
+            );
+        };
+        Some(())
     }
 }

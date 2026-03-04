@@ -47,6 +47,7 @@ impl BufferContainer {
             BufferUsage::Uniform => BufferUsageFlags::UNIFORM_BUFFER,
             BufferUsage::Vertex => BufferUsageFlags::VERTEX_BUFFER,
             BufferUsage::Index => BufferUsageFlags::INDEX_BUFFER,
+            BufferUsage::Staging => BufferUsageFlags::empty(),
         } | BufferUsageFlags::TRANSFER_DST
             | BufferUsageFlags::TRANSFER_SRC;
 
@@ -212,6 +213,8 @@ pub enum BufferUsage {
     Index,
     Storage,
     Uniform,
+    /// Just for copying data from CPU to GPU
+    Staging,
 }
 
 /// Unique identifier to `GeneralBuffer` in a `BufferContainer` with extra information
