@@ -95,6 +95,7 @@ impl winit::application::ApplicationHandler for App {
                 void main() {
                     uv = vec2((gl_VertexIndex << 1u) & 2u, gl_VertexIndex & 2u);
                     gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
+                    uv.y = -uv.y;
                 }",
                 ShaderType::Vertex,
             )
@@ -116,7 +117,7 @@ impl winit::application::ApplicationHandler for App {
 
             void main() {
                 vec4 fetched_color = texture(sampler2D(tex, tex_s), uv).rgba;
-                outColor = vec4(fetched_color.rgb*fetched_color.a,1.0);
+                outColor = vec4(fetched_color.rgb*fetched_color.a, 1.0);
             }",
                 ShaderType::Fragment,
             )
@@ -198,7 +199,6 @@ impl winit::application::ApplicationHandler for App {
         let mut render_graph = RenderGraph::new();
         let image = image::load_from_memory(include_bytes!("Vulkan-logo.png"))
             .unwrap()
-            .flipv()
             .to_rgba8();
         render_graph.add_operation(Operation::UploadImage(UploadImageOp::new(image, texture)));
 
