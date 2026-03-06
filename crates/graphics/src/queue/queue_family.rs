@@ -59,3 +59,8 @@ impl QueueFamily {
         score
     }
 }
+impl PartialEq for QueueFamily {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}

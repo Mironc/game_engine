@@ -37,16 +37,10 @@ fn check_repr_c(input: &DeriveInput) -> Result<(), syn::Error> {
 }
 fn get_encase_path() -> Path {
     match crate_name("graphics") {
-        Ok(FoundCrate::Itself) => {
-            parse_str("crate::rendering::buffer_container").unwrap()
-        }
+        Ok(FoundCrate::Itself) => parse_str("crate::rendering::buffer_container").unwrap(),
         Ok(FoundCrate::Name(name)) => {
             let ident = syn::Ident::new(&name, proc_macro2::Span::call_site());
-            parse_str(&format!(
-                "::{}::rendering::buffer_container",
-                ident
-            ))
-            .unwrap()
+            parse_str(&format!("::{}::rendering::buffer_container", ident)).unwrap()
         }
         _ => parse_str("::graphics::rendering::buffer_container").unwrap(),
     }
@@ -105,12 +99,12 @@ pub fn vertex_data_derive(input: TokenStream) -> TokenStream {
 
     let mut attrs = Vec::new();
 
-    for (_i, field) in fields.iter().enumerate() {
+    for (i, field) in fields.iter().enumerate() {
         let field_name = &field.ident;
         let field_type = &field.ty;
-        //let location = i as u32;
+        let location = i;
 
-        attrs.push(quote! { <#field_type as #crate_root::rendering::buffer_container::ToVertexAttribute>::to_attrib(core::mem::offset_of!(#name, #field_name))});
+        attrs.push(quote! { <#field_type as #crate_root::rendering::buffer_container::ToVertexAttribute>::to_attrib(core::mem::offset_of!(#name, #field_name),#location)});
     }
 
     let expanded = quote! {

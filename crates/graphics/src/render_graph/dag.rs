@@ -3,7 +3,6 @@ use std::collections::{HashSet, VecDeque};
 #[derive(Debug, Clone)]
 pub struct DirectedAcyclicGraph<N, E> {
     nodes: Vec<N>,
-
     edges: Vec<Vec<(usize, E)>>,
     rev_edges: Vec<Vec<usize>>,
 }
@@ -15,16 +14,16 @@ impl<N, E> DirectedAcyclicGraph<N, E> {
             rev_edges: Vec::new(),
         }
     }
-    ///Returns node data for given `id`,
-    ///if `id` is not present in graph returns `None`
+    /// Returns node data for given `id`,
+    /// if `id` is not present in graph returns `None`
     pub fn get_node(&self, id: usize) -> Option<&N> {
         self.nodes.get(id)
     }
-    ///Returns number of nodes in graph
+    /// Returns number of nodes in graph
     pub fn node_count(&self) -> usize {
         self.nodes.len()
     }
-    ///Counts number of descending nodes, including itself
+    /// Counts number of descending nodes, including itself
     pub fn descendants_count(&self, node: usize) -> usize {
         if let Some(neighbours) = self.edges.get(node) {
             return neighbours
@@ -46,7 +45,7 @@ impl<N, E> DirectedAcyclicGraph<N, E> {
         for node in self.nodes.iter().enumerate() {
             let mut stack = vec![node.0];
             let mut visited = HashSet::new();
-            
+
             while let Some(current_node) = stack.pop() {
                 if current_node == node.0 {
                     return true;
@@ -62,7 +61,7 @@ impl<N, E> DirectedAcyclicGraph<N, E> {
         }
         false
     }
-    ///checks if adding edge between nodes create cycle
+    /// Checks if adding edge between nodes create cycle
     pub fn would_cycle(&self, node_from: usize, node_to: usize) -> bool {
         if node_from == node_to {
             return true;
@@ -87,7 +86,7 @@ impl<N, E> DirectedAcyclicGraph<N, E> {
         false
     }
 
-    ///returns None if node creates cycle or nodes are not present in graph
+    /// Returns None if node creates cycle or nodes are not present in graph
     pub fn add_edge(&mut self, node_from: usize, node_to: usize, edge_data: E) -> Option<()> {
         if self.would_cycle(node_from, node_to) {
             return None;
@@ -95,9 +94,9 @@ impl<N, E> DirectedAcyclicGraph<N, E> {
         self.add_edge_cyclic(node_from, node_to, edge_data)
     }
 
-    ///Returns None if node_from or node_to is not present in graph or node_from == node_to
+    /// Returns None if node_from or node_to is not present in graph or node_from == node_to
     ///
-    ///May introduce cycles into graph
+    /// May introduce cycles into graph
     pub fn add_edge_cyclic(
         &mut self,
         node_from: usize,
@@ -111,8 +110,19 @@ impl<N, E> DirectedAcyclicGraph<N, E> {
         self.rev_edges[node_to].push(node_from);
         Some(())
     }
+    /// Checks if there's edge between two nodes.
+    ///
+    /// Beware that it's works only in one way
+    ///
+    /// If node is not present in graph it will return false
+    pub fn has_edge(&self, node_from: usize, node_to: usize) -> bool {
+        if let Some(edges) = self.edges.get(node_from) {
+            return edges.iter().any(|(x, _)| node_to == *x);
+        }
+        false
+    }
 
-    ///Return vector where index gives info about children that node has
+    /// Returns vector where index gives info about children that node has
     pub fn edges(&self) -> &Vec<Vec<(usize, E)>> {
         &self.edges
     }
@@ -130,7 +140,7 @@ impl<N, E> DirectedAcyclicGraph<N, E> {
     ///Firstly removes nodes that are not connected to target node
     ///
     ///Secondly makes topological sort
-    pub fn compile(&self, target_node: usize) -> Option<Vec<usize>> { //TODO: make it include edge data
+    pub fn compile(&self, target_node: usize) -> Option<Vec<usize>> {
         let n = self.nodes.len();
 
         let mut alive = vec![false; n];

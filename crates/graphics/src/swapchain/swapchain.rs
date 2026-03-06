@@ -13,21 +13,18 @@ use crate::{
     context::GraphicsContext,
     device::DeviceContext,
     queue::logical_queue::Queue,
-    swapchain::{frame_data::FrameData, frame_sync::FrameSync},
+    swapchain::{FrameImage, ImageSync, frame_data::FrameData, frame_sync::FrameSync},
 };
 
 ///Hardcoded count of frames in flight
 const FIF_COUNT: usize = 2;
 pub struct SwapChain {
     device: swapchain::Device,
-    swapchain_khr: SwapchainKHR,
-    extent2d: Extent2D,
-    format: Format,
-    images: Vec<Image>,
-    image_views: Vec<ImageView>,
     device_context: Arc<DeviceContext>,
-    frame_syncs: Vec<FrameSync>,
+    swapchain_khr: SwapchainKHR,
     current_frame: usize,
+    syncs: Vec<FrameSync>,
+    frames: Vec<FrameImage>,
 }
 impl SwapChain {
     pub fn new(
@@ -43,7 +40,6 @@ impl SwapChain {
         window: &Window,
         previous: Option<&Self>,
     ) -> Result<Self, Box<dyn Error>> {
-        println!("Starting creating swapchain");
         let formats = device_context.pdevice().surface_formats();
         let format_khr = {
             if formats.len() == 1 && formats[0].format == vk::Format::UNDEFINED {
@@ -82,7 +78,7 @@ impl SwapChain {
             }
         };
 
-        let image_count = capabilities.min_image_count;
+        let image_count = capabilities.min_image_count.max(3);
         log::debug!(
             "Swapchain format: {:?} present mode: {:?}  extent: {:?} image count: {:?}",
             format_khr,
@@ -151,22 +147,30 @@ impl SwapChain {
                 unsafe { device_context.create_image_view(&create_info, None) }
             })
             .collect::<Result<Vec<_>, _>>()?;
-        println!("Swapchain created");
 
-        let frame_syncs = (0..FIF_COUNT)
+        let syncs = (0..FIF_COUNT)
             .map(|_| FrameSync::new(device_context))
-            .collect();
+            .collect::<Vec<FrameSync>>();
+        let frames = (0..image_count as usize)
+            .map(|i| {
+                FrameImage::new(
+                    i as u32,
+                    images[i],
+                    extent2d,
+                    image_views[i],
+                    format_khr.format,
+                    ImageSync::new(device_context),
+                )
+            })
+            .collect::<Vec<FrameImage>>();
 
         Ok(Self {
             device: sdevice,
             swapchain_khr,
-            extent2d,
-            format: format_khr.format,
-            images,
-            image_views,
             device_context: device_context.clone(),
-            frame_syncs,
             current_frame: 0,
+            frames,
+            syncs,
         })
     }
 
@@ -181,9 +185,12 @@ impl SwapChain {
             device_context
                 .device_wait_idle()
                 .expect("Panic on idle wait");
-            self.image_views
-                .iter()
-                .for_each(|x| self.device_context.destroy_image_view(*x, None));
+            for frame in self.frames.iter() {
+                self.device_context
+                    .destroy_image_view(frame.image_view(), None);
+                device_context.destroy_semaphore(frame.image_sync().render_finished(), None);
+            }
+            self.syncs.iter().for_each(|x| x.destroy(device_context));
             let swapchain_khr_handle = self.swapchain_khr;
             let new_swapchain =
                 Self::create_swapchain(context, device_context, window, Some(self))?;
@@ -194,13 +201,15 @@ impl SwapChain {
         }
     }
     pub fn size(&self) -> Extent2D {
-        self.extent2d
+        self.frames[0].extent()
     }
     ///This function is designed to be called once per frame
     ///
     ///It may block thread, if swapchain has no free images and previous frames are not dropped via present_frame()
-    pub fn next_frame(&mut self) -> FrameData {
-        let current_sync = self.frame_syncs[self.current_frame].clone();
+    pub fn next_frame(&mut self, device_context: &DeviceContext) -> FrameData {
+        let current_sync = self.syncs[self.current_frame].clone();
+        current_sync.wait(device_context);
+
         let image_id = unsafe {
             let res = self
                 .device
@@ -211,14 +220,15 @@ impl SwapChain {
                     Fence::null(),
                 )
                 .expect("Couldn't acquire next image");
-            log::info!("Acquired image is suboptimal to swapchain:{}", res.1);
             res.0
         };
-        let image = self.images[image_id as usize];
-
         self.current_frame = (self.current_frame + 1) % FIF_COUNT;
-        println!("{}", self.current_frame);
-        FrameData::new(self.current_frame, current_sync, image_id, image)
+        current_sync.clear(device_context);
+        FrameData::new(
+            self.current_frame,
+            current_sync,
+            self.frames[image_id as usize],
+        )
     }
     ///This call presents frame on the screen with framedata
     pub fn present_frame(
@@ -226,9 +236,9 @@ impl SwapChain {
         present_queue: &Queue,
         frame_data: FrameData,
     ) -> Result<(), Box<dyn Error>> {
-        let image_indices = [frame_data.image_id()];
+        let image_indices = [frame_data.image().image_id()];
         let swapchain_khr = [self.swapchain_khr];
-        let render_finished = [frame_data.sync().render_finished()];
+        let render_finished = [frame_data.image().image_sync().render_finished()];
         let present_info = vk::PresentInfoKHR::default()
             .wait_semaphores(&render_finished)
             .swapchains(&swapchain_khr)
@@ -240,11 +250,11 @@ impl SwapChain {
         };
         Ok(())
     }
+
+    pub fn frames(&self) -> &[FrameImage] {
+        &self.frames
+    }
 }
 impl Drop for SwapChain {
-    fn drop(&mut self) {
-        self.frame_syncs
-            .iter_mut()
-            .for_each(|x| x.destroy(&self.device_context));
-    }
+    fn drop(&mut self) {}
 }

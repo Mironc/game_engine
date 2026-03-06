@@ -28,27 +28,31 @@ impl LocalCommandPool {
             used: 0,
         }
     }
-    ///Gives clean command buffer  
+    ///Gives clean command buffer
     pub fn get_buffer(&mut self, logical_device: &DeviceContext) -> CommandBuffer {
-        if self.used + 1 < self.command_buffers.len() {
+        if self.used < self.command_buffers.len() {
+            let buffer = self.command_buffers[self.used];
             self.used += 1;
-            return self.command_buffers[self.used];
-        } else {
-            self.used += 1;
-            let allocate_info = CommandBufferAllocateInfo::default()
-                .command_pool(self.command_pool)
-                .command_buffer_count(1);
-            let command_buffer = unsafe {
-                logical_device
-                    .allocate_command_buffers(&allocate_info)
-                    .expect("Couldn't allocate command buffer")
-            }
-            .first()
-            .unwrap()
-            .to_owned();
-            self.command_buffers.push(command_buffer);
-            command_buffer
+            return buffer;
         }
+
+        // 2. Если все буферы заняты, выделяем новый
+        let allocate_info = ash::vk::CommandBufferAllocateInfo::default()
+            .command_pool(self.command_pool)
+            .level(ash::vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+
+        let buffers = unsafe {
+            logical_device
+                .allocate_command_buffers(&allocate_info)
+                .expect("Couldn't allocate command buffer")
+        };
+
+        let command_buffer = buffers[0]; // Забираем хэндл
+        self.command_buffers.push(command_buffer);
+        self.used += 1;
+
+        command_buffer
     }
     ///Returns all buffers that was written
     pub fn get_written_buffers(&self) -> &[CommandBuffer] {

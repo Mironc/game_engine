@@ -25,8 +25,8 @@ pub struct Instance {
 }
 impl Instance {
     pub fn init(entry: &Entry, window: &Window) -> Result<Self, Box<dyn Error>> {
-        for layer in unsafe { entry.enumerate_instance_layer_properties() }.unwrap(){
-            println!("{:?}",layer)
+        for layer in unsafe { entry.enumerate_instance_layer_properties() }.unwrap() {
+            println!("{:?}", layer)
         }
         // Supported vulkan version
         let (major, minor) = match unsafe { entry.try_enumerate_instance_version()? } {
@@ -65,6 +65,7 @@ impl Instance {
         };
 
         let layer_names = [std::ffi::CString::new("VK_LAYER_KHRONOS_validation").unwrap()];
+        //let layer_names: [CString; 0] = [];
         let layers_pointers: Vec<*const i8> = layer_names
             .iter()
             .map(|layer_name| layer_name.as_ptr())
@@ -129,7 +130,6 @@ impl Instance {
             .collect();
         graphic_devices.iter().for_each(|x| {
             x.queue_families();
-            println!("{}", x.rate_default());
         });
         Ok(graphic_devices)
     }

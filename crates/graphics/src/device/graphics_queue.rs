@@ -6,10 +6,10 @@ use crate::queue::logical_queue::Queue;
 pub struct RenderQueue(Queue, Queue, bool);
 impl RenderQueue {
     pub fn new(graphics_queue: Queue, present_queue: Queue) -> Self {
-        let shared = if graphics_queue.handle() == present_queue.handle() {
-            false
-        } else {
+        let shared = if graphics_queue.queue_family() == present_queue.queue_family() {
             true
+        } else {
+            false
         };
         Self(graphics_queue, present_queue, shared)
     }

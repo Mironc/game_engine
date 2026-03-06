@@ -2,14 +2,19 @@
 name = "game_engine"
 version = "0.1.0"
 edition = "2024"
+readme = "README.md"
+license = "Apache-2.0"
 
-[dependencies]
-graphics = { path = "crates/graphics" }
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+license = "Apache-2.0"
 
 [workspace.dependencies]
 log = "0.4"
 simple_logger = "5.1"
 
-[workspace]
-members = ["crates/*"]
-resolver = "2"
+[dependencies]
+graphics = { path = "crates/graphics" }

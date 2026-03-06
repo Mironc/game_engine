@@ -16,7 +16,6 @@ pub struct Queue {
 }
 impl Queue {
     pub fn new(raw_queue: Q, queue_family: QueueFamily) -> Self {
-        println!("created queue with id {:?}", raw_queue);
         Self {
             raw_queue,
             queue_family,
@@ -37,14 +36,8 @@ impl Queue {
         let thread_id = std::thread::current().id();
         self.command_pools
             .entry((frame_data.fif_id(), thread_id))
-            .or_insert(LocalCommandPool::new(logical_device, self.queue_family))
+            .or_insert_with(|| LocalCommandPool::new(logical_device, self.queue_family))
     }
-    pub fn clean_commandpools(&self, device: &DeviceContext) {
-        self.command_pools
-            .iter_mut()
-            .for_each(|mut x| x.reset(&device));
-    }
-
     pub fn queue_family(&self) -> &QueueFamily {
         &self.queue_family
     }
