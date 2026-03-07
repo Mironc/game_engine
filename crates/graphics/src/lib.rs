@@ -4,9 +4,11 @@
 //!
 //! It's hardly bond to vulkan and other graphics APIs are not going to be supported (atleast for now)
 pub mod context;
+pub mod device;
 pub mod instance;
+pub mod queue;
 pub mod render_graph;
 pub mod rendering;
 pub mod swapchain;
-pub mod queue;
-pub mod device;
+
+extern crate self as graphics;
